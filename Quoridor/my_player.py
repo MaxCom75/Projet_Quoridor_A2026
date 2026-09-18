@@ -1,7 +1,10 @@
 from player_quoridor import PlayerQuoridor
-from seahorse.game.action import Action
 from game_state_quoridor import GameStateQuoridor
+from typing import Optional
 from seahorse.utils.custom_exceptions import MethodNotImplementedError
+from seahorse.game.action import Action
+from seahorse.player.player import Player
+from queue import PriorityQueue
 
 class MyPlayer(PlayerQuoridor):
     """
@@ -32,6 +35,39 @@ class MyPlayer(PlayerQuoridor):
         Returns:
             Action: The best action as determined by minimax.
         """
+        actions = tuple(current_state.generate_possible_stateless_actions())
+        
+        if not actions:
+            raise RuntimeError("No legal action available.")
 
-        #TODO
-        raise MethodNotImplementedError()
+        best_action = None
+        best_cost = 100
+
+        prefer_placing_wall = False
+
+        my_player = 0
+        ennemy = 1
+        if current_state.active_player.id == current_state.players[1].id:
+            my_player = 1
+            ennemy = 0
+
+        my_shortest_path = current_state._shortest_path(current_state.players[my_player])
+        ennemy_shortest_path = current_state._shortest_path(current_state.players[ennemy])
+        if my_shortest_path > ennemy_shortest_path:
+            prefer_placing_wall = True
+            best_cost = 0
+
+        for action in actions:
+            temp_state = current_state.apply_action(action)
+            if prefer_placing_wall:
+                cost = temp_state._shortest_path(temp_state.players[ennemy])
+                if cost > best_cost:
+                    best_cost = cost
+                    best_action = action
+            else:
+                cost = temp_state._shortest_path(temp_state.players[my_player])
+                if cost < best_cost:
+                    best_cost = cost
+                    best_action = action
+
+        return best_action
