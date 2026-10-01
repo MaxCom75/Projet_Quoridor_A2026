@@ -1,10 +1,11 @@
 from player_quoridor import PlayerQuoridor
 from game_state_quoridor import GameStateQuoridor
-from typing import Optional
+from typing import Optional, List
 from seahorse.utils.custom_exceptions import MethodNotImplementedError
 from seahorse.game.action import Action
 from seahorse.player.player import Player
 from queue import PriorityQueue
+import math
 
 class MyPlayer(PlayerQuoridor):
     """
@@ -35,39 +36,60 @@ class MyPlayer(PlayerQuoridor):
         Returns:
             Action: The best action as determined by minimax.
         """
-        actions = tuple(current_state.generate_possible_stateless_actions())
-        
-        if not actions:
-            raise RuntimeError("No legal action available.")
+        def max_value(state: GameStateQuoridor, alpha, beta, depth):
+            if state.is_done() or depth == 0:
+                return heuristic(state), None
+            v = -math.inf
+            m = None
+            for action in state.get_possible_stateful_actions():
+                print(action)
+                s1 = action.get_next_game_state()
+                (v1, _) = min_value(s1, alpha, beta, depth - 1)
+                if v1 > v:
+                    v = v1
+                    m = action
+                    alpha = max(alpha, v)
+                if v >= beta:
+                    return (v, m)
+            return (v, m)
 
-        best_action = None
-        best_cost = 100
+        def min_value(state: GameStateQuoridor, alpha, beta, depth):
+            if state.is_done() or depth == 0:
+                return heuristic(state), None
+            v = math.inf
+            m = None
+            for action in state.get_possible_stateful_actions():
+                print(action)
+                s1 = action.get_next_game_state()
+                (v1, _) = max_value(s1, alpha, beta, depth - 1)
+                if v1 < v:
+                    v = v1
+                    m = action
+                    beta = min(beta, v)
+                if v <= alpha:
+                    return (v, m)
+            return (v, m)
 
-        prefer_placing_wall = False
+        def heuristic(state: GameStateQuoridor):
+            """
+            Score in [-1, 1] from the max player's (self) point of view, based on
+            the difference between both players' shortest path to their goal row.
+            1 = max player wins, -1 = opponent wins.
+            """
+            if state.is_done():
+                return 1 if state.get_player_score(self) == 1.0 else -1
 
-        my_player = 0
-        ennemy = 1
-        if current_state.active_player.id == current_state.players[1].id:
-            my_player = 1
-            ennemy = 0
+            opponent = state._opponent(self)
+            my_dist = state._shortest_path(self)
+            opp_dist = state._shortest_path(opponent)
 
-        my_shortest_path = current_state._shortest_path(current_state.players[my_player])
-        ennemy_shortest_path = current_state._shortest_path(current_state.players[ennemy])
-        if my_shortest_path > ennemy_shortest_path:
-            prefer_placing_wall = True
-            best_cost = 0
+            # Both paths are guaranteed to exist by the wall legality rules
+            if my_dist is None or opp_dist is None:
+                return 0
 
-        for action in actions:
-            temp_state = current_state.apply_action(action)
-            if prefer_placing_wall:
-                cost = temp_state._shortest_path(temp_state.players[ennemy])
-                if cost > best_cost:
-                    best_cost = cost
-                    best_action = action
-            else:
-                cost = temp_state._shortest_path(temp_state.players[my_player])
-                if cost < best_cost:
-                    best_cost = cost
-                    best_action = action
+            longest = max(my_dist, opp_dist)
+            if longest == 0:
+                return 0
+            return (opp_dist - my_dist) / longest
 
-        return best_action
+        return max_value(current_state, -math.inf, math.inf, 2)[1]
