@@ -41,8 +41,7 @@ class MyPlayer(PlayerQuoridor):
                 return heuristic(state), None
             v = -math.inf
             m = None
-            for action in state.get_possible_stateful_actions():
-                s1 = action.get_next_game_state()
+            for action, s1 in best_quarter(state, maximize=True):
                 (v1, _) = min_value(s1, alpha, beta, depth - 1)
                 if v1 > v:
                     v = v1
@@ -57,8 +56,7 @@ class MyPlayer(PlayerQuoridor):
                 return heuristic(state), None
             v = math.inf
             m = None
-            for action in state.get_possible_stateful_actions():
-                s1 = action.get_next_game_state()
+            for action, s1 in best_quarter(state, maximize=False):
                 (v1, _) = max_value(s1, alpha, beta, depth - 1)
                 if v1 < v:
                     v = v1
@@ -67,6 +65,15 @@ class MyPlayer(PlayerQuoridor):
                 if v <= alpha:
                     return (v, m)
             return (v, m)
+
+        def best_quarter(state: GameStateQuoridor, maximize: bool):
+            children = []
+            for action in state.get_possible_stateful_actions():
+                s1 = action.get_next_game_state()
+                children.append((heuristic(s1), action, s1))
+            children.sort(key=lambda c: c[0], reverse=maximize)
+            quarter = (len(children) + 3) // 4
+            return [(action, s1) for _, action, s1 in children[:quarter]]
 
         def heuristic(state: GameStateQuoridor):
             if state.is_done():
@@ -86,4 +93,4 @@ class MyPlayer(PlayerQuoridor):
             raw = (opp_dist - my_dist) + WALL_VALUE * wall_diff
             return math.tanh(raw / 5)
 
-        return max_value(current_state, -math.inf, math.inf, 10)[1]
+        return max_value(current_state, -math.inf, math.inf, 3)[1]
