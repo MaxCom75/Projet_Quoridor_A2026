@@ -42,7 +42,6 @@ class MyPlayer(PlayerQuoridor):
             v = -math.inf
             m = None
             for action in state.get_possible_stateful_actions():
-                print(action)
                 s1 = action.get_next_game_state()
                 (v1, _) = min_value(s1, alpha, beta, depth - 1)
                 if v1 > v:
@@ -59,7 +58,6 @@ class MyPlayer(PlayerQuoridor):
             v = math.inf
             m = None
             for action in state.get_possible_stateful_actions():
-                print(action)
                 s1 = action.get_next_game_state()
                 (v1, _) = max_value(s1, alpha, beta, depth - 1)
                 if v1 < v:
@@ -71,11 +69,6 @@ class MyPlayer(PlayerQuoridor):
             return (v, m)
 
         def heuristic(state: GameStateQuoridor):
-            """
-            Score in [-1, 1] from the max player's (self) point of view, based on
-            the difference between both players' shortest path to their goal row.
-            1 = max player wins, -1 = opponent wins.
-            """
             if state.is_done():
                 return 1 if state.get_player_score(self) == 1.0 else -1
 
@@ -83,13 +76,14 @@ class MyPlayer(PlayerQuoridor):
             my_dist = state._shortest_path(self)
             opp_dist = state._shortest_path(opponent)
 
-            # Both paths are guaranteed to exist by the wall legality rules
             if my_dist is None or opp_dist is None:
                 return 0
 
-            longest = max(my_dist, opp_dist)
-            if longest == 0:
-                return 0
-            return (opp_dist - my_dist) / longest
+            WALL_VALUE = 1.5
+            walls = state.get_rep().remaining_walls
+            wall_diff = walls[self.id] - walls[opponent.id]
 
-        return max_value(current_state, -math.inf, math.inf, 2)[1]
+            raw = (opp_dist - my_dist) + WALL_VALUE * wall_diff
+            return math.tanh(raw / 5)
+
+        return max_value(current_state, -math.inf, math.inf, 10)[1]
