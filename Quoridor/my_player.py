@@ -6,6 +6,10 @@ from seahorse.game.action import Action
 from seahorse.player.player import Player
 from queue import PriorityQueue
 import math
+import time
+
+class SearchTimeout(Exception):
+    pass
 
 class MyPlayer(PlayerQuoridor):
     """
@@ -37,11 +41,16 @@ class MyPlayer(PlayerQuoridor):
             Action: The best action as determined by minimax.
         """
         def max_value(state: GameStateQuoridor, alpha, beta, depth):
-            if state.is_done() or depth == 0:
+            if time.time() > deadline:
+                raise SearchTimeout()
+            if state.is_done():
+                return terminal_value(state, depth), None
+            neighbors = generateNeighbors(state, maximize=True) if depth > 0 else []
+            if not neighbors:
                 return heuristic(state), None
             v = -math.inf
             m = None
-            for action, s1 in best_quarter(state, maximize=True):
+            for action, s1 in neighbors:
                 (v1, _) = min_value(s1, alpha, beta, depth - 1)
                 if v1 > v:
                     v = v1
@@ -52,11 +61,16 @@ class MyPlayer(PlayerQuoridor):
             return (v, m)
 
         def min_value(state: GameStateQuoridor, alpha, beta, depth):
-            if state.is_done() or depth == 0:
+            if time.time() > deadline:
+                raise SearchTimeout()
+            if state.is_done():
+                return terminal_value(state, depth), None
+            neighbors = generateNeighbors(state, maximize=False) if depth > 0 else []
+            if not neighbors:
                 return heuristic(state), None
             v = math.inf
             m = None
-            for action, s1 in best_quarter(state, maximize=False):
+            for action, s1 in neighbors:
                 (v1, _) = max_value(s1, alpha, beta, depth - 1)
                 if v1 < v:
                     v = v1
@@ -66,31 +80,73 @@ class MyPlayer(PlayerQuoridor):
                     return (v, m)
             return (v, m)
 
-        def best_quarter(state: GameStateQuoridor, maximize: bool):
-            children = []
-            for action in state.get_possible_stateful_actions():
-                s1 = action.get_next_game_state()
-                children.append((heuristic(s1), action, s1))
-            children.sort(key=lambda c: c[0], reverse=maximize)
-            quarter = (len(children) + 3) // 4
-            return [(action, s1) for _, action, s1 in children[:quarter]]
+        def generateNeighbors(state: GameStateQuoridor, maximize: bool):
+            PAWN_RADIUS = 1
+            WALL_RADIUS = 2
+            pawns = list(state.rep.pawn_positions.values())
+            walls = [(w.row, w.col) for w in state.rep.walls]
+
+            def is_near(pos, others, radius):
+                return any(max(abs(pos[0] - o[0]), abs(pos[1] - o[1])) <= radius for o in others)
+
+            neighbors = []
+            state_score = heuristic(state)
+            for action in state.generate_possible_stateless_actions():
+                destination = action.data["destination"]
+                if action.data["type"] == "move":
+                    chosen = True
+                else:
+                    chosen = is_near(destination, pawns, PAWN_RADIUS) or is_near(destination, walls, WALL_RADIUS)
+                if chosen:
+                    s1 = state.apply_action(action)
+                    s1_score = heuristic(s1)
+                    if (maximize and s1_score > state_score) or (not maximize and s1_score < state_score):
+                        neighbors.append((action, s1))
+            return neighbors
+
+        def terminal_value(state: GameStateQuoridor, depth):
+            # Scale by remaining depth so a win found sooner (or a loss found later) is preferred
+            return heuristic(state) * (1 + depth)
 
         def heuristic(state: GameStateQuoridor):
             if state.is_done():
                 return 1 if state.get_player_score(self) == 1.0 else -1
-
             opponent = state._opponent(self)
             my_dist = state._shortest_path(self)
             opp_dist = state._shortest_path(opponent)
+            # A wall in hand is a threat to lengthen the opponent's path later, so it has value
+            # Below 1 so a wall that only adds +1 still counts as an improvement for the neighbor filter
+            WALL_VALUE = 0.5
+            MAX_WALLS = 10
+            wall_diff = state.rep.remaining_walls[self.id] - state.rep.remaining_walls[opponent.id]
 
-            if my_dist is None or opp_dist is None:
-                return 0
+            # Equal distances with me to move means I arrive first
+            my_turn = state.get_active_player().get_id() == self.id
+            ahead = my_dist < opp_dist or (my_dist == opp_dist and my_turn)
 
-            WALL_VALUE = 1.5
-            walls = state.get_rep().remaining_walls
-            wall_diff = walls[self.id] - walls[opponent.id]
+            if ahead:
+                # Shortening my own path always beats anything else; opponent's path and walls are tie-breakers
+                max_dist = state.rep.dimension ** 2
+                tie_range = max_dist + 2 * WALL_VALUE * MAX_WALLS + 1
+                tie_break = (opp_dist + WALL_VALUE * (wall_diff + MAX_WALLS)) / tie_range  # in [0, 1)
+                key = -my_dist + tie_break  # in [-max_dist, 1)
+                return (key + max_dist + 1) / (max_dist + 3)  # in (0, 1)
 
-            raw = (opp_dist - my_dist) + WALL_VALUE * wall_diff
-            return math.tanh(raw / 5)
+            # Not ahead: race difference plus walls in hand, mapped into (-1, 0) to stay below any ahead score
+            return (math.tanh((opp_dist - my_dist + WALL_VALUE * wall_diff) / 5) - 1) / 2
 
-        return max_value(current_state, -math.inf, math.inf, 3)[1]
+        MAX_DEPTH = 20
+        moves_left = current_state._shortest_path(self) + current_state.rep.remaining_walls[self.id]
+        budget = remaining_time / (moves_left + 5)
+        deadline = time.time() + budget
+
+        best_action = next(iter(current_state.generate_possible_stateless_actions()))
+
+        for depth in range(1, MAX_DEPTH + 1):
+            try:
+                action = max_value(current_state, -math.inf, math.inf, depth)[1]
+            except SearchTimeout:
+                break
+            if action is not None:
+                best_action = action
+        return best_action
