@@ -90,7 +90,6 @@ class MyPlayer(PlayerQuoridor):
                 return any(max(abs(pos[0] - o[0]), abs(pos[1] - o[1])) <= radius for o in others)
 
             neighbors = []
-            state_score = heuristic(state)
             for action in state.generate_possible_stateless_actions():
                 destination = action.data["destination"]
                 if action.data["type"] == "move":
@@ -100,9 +99,14 @@ class MyPlayer(PlayerQuoridor):
                 if chosen:
                     s1 = state.apply_action(action)
                     s1_score = heuristic(s1)
-                    if (maximize and s1_score > state_score) or (not maximize and s1_score < state_score):
-                        neighbors.append((action, s1))
-            return neighbors
+                    neighbors.append((s1_score, action, s1))
+                    
+            def neighbor_score(neighbor):
+                return neighbor[0]
+
+            # Order promising candidates first, including neutral or worsening moves.
+            neighbors.sort(key=neighbor_score, reverse=maximize)
+            return [(action, s1) for _, action, s1 in neighbors]
 
         def terminal_value(state: GameStateQuoridor, depth):
             # Scale by remaining depth so a win found sooner (or a loss found later) is preferred
@@ -115,7 +119,7 @@ class MyPlayer(PlayerQuoridor):
             my_dist = state._shortest_path(self)
             opp_dist = state._shortest_path(opponent)
             # A wall in hand is a threat to lengthen the opponent's path later, so it has value
-            # Below 1 so a wall that only adds +1 still counts as an improvement for the neighbor filter
+            # Value each remaining wall at half a unit of path distance.
             WALL_VALUE = 0.5
             MAX_WALLS = 10
             wall_diff = state.rep.remaining_walls[self.id] - state.rep.remaining_walls[opponent.id]
