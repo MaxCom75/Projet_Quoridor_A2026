@@ -12,16 +12,12 @@ import random
 class SearchTimeout(Exception):
     pass
 
-
-# Logistic-regression evaluation, trained by logistic_regression.py on past_game_data
-# (1362 games, test log-loss 0.459, AUC 0.843). After retraining, copy the values from
-# logistic_weights.json here, and keep extract_features identical in both files.
 LR_FEATURE_NAMES = [
-    "my_dist",            # my shortest path to my goal row (pawns ignored)
-    "opp_dist",           # opponent's shortest path
-    "my_turn",            # 1 if `player` is to move
-    "my_walls",           # walls I have left
-    "opp_walls",          # walls the opponent has left
+    "my_dist",
+    "opp_dist",
+    "my_turn",
+    "my_walls",
+    "opp_walls",
 ]
 LR_BIAS = -0.1737384627491996
 LR_WEIGHTS = [
@@ -119,7 +115,7 @@ class MyPlayer(PlayerQuoridor):
                     chosen = is_near(destination, pawns, PAWN_RADIUS) or is_near(destination, walls, WALL_RADIUS)
                 if chosen:
                     s1 = state.apply_action(action)
-                    s1_score = heuristic(s1)
+                    s1_score = pruning_score(s1)
                     if (maximize and s1_score >= state_score) or (not maximize and s1_score <= state_score):
                         neighbors.append((action, s1, s1_score))
                     else:
@@ -145,11 +141,19 @@ class MyPlayer(PlayerQuoridor):
                 float(state.rep.remaining_walls[opponent.id]),
             ]
 
-        def heuristic(state: GameStateQuoridor):
+        def heuristic(state: GameStateQuoridor, with_turn: bool = True):
             if state.is_done():
                 return 1.0 if state.get_player_score(self) == 1.0 else -1.0
-            z = LR_BIAS + sum(w * x for w, x in zip(LR_WEIGHTS, extract_features(state)))
+            features = extract_features(state)
+            if not with_turn:
+                features[TURN_INDEX] = 0.0
+            z = LR_BIAS + sum(w * x for w, x in zip(LR_WEIGHTS, features))
             return math.tanh(z / 2)  # == 2 * sigmoid(z) - 1
+
+        TURN_INDEX = LR_FEATURE_NAMES.index("my_turn")
+
+        def pruning_score(state: GameStateQuoridor):
+            return heuristic(state, with_turn=False)
           
         MAX_DEPTH = 20
         EFFECTIVE_BRANCHING = 3
@@ -170,7 +174,7 @@ class MyPlayer(PlayerQuoridor):
         best_action = next(iter(current_state.generate_possible_stateless_actions()))
 
         try:
-            _, action = max_value(current_state, heuristic(current_state), -math.inf, math.inf, 1)
+            _, action = max_value(current_state, pruning_score(current_state), -math.inf, math.inf, 1)
             if action is not None:
                 best_action = action
         except SearchTimeout:
@@ -187,7 +191,7 @@ class MyPlayer(PlayerQuoridor):
         while True:
             try:
                 start = time.time()
-                value, action = max_value(current_state, heuristic(current_state), -math.inf, math.inf, depth)
+                value, action = max_value(current_state, pruning_score(current_state), -math.inf, math.inf, depth)
                 end = time.time()
                 duration = end - start
                 i += 1
