@@ -12,6 +12,26 @@ import random
 class SearchTimeout(Exception):
     pass
 
+
+# Logistic-regression evaluation, trained by logistic_regression.py on past_game_data
+# (1362 games, test log-loss 0.459, AUC 0.843). After retraining, copy the values from
+# logistic_weights.json here, and keep extract_features identical in both files.
+LR_FEATURE_NAMES = [
+    "my_dist",            # my shortest path to my goal row (pawns ignored)
+    "opp_dist",           # opponent's shortest path
+    "my_turn",            # 1 if `player` is to move
+    "my_walls",           # walls I have left
+    "opp_walls",          # walls the opponent has left
+]
+LR_BIAS = -0.1737384627491996
+LR_WEIGHTS = [
+    -0.31365303726345883,
+    0.31365303726345883,
+    0.3474769254983992,
+    0.24767372513616662,
+    -0.24767372513616656,
+]
+
 class MyPlayer(PlayerQuoridor):
     """
     Player class for Quoridor game
@@ -111,27 +131,25 @@ class MyPlayer(PlayerQuoridor):
         def terminal_value(state: GameStateQuoridor, depth):
             return heuristic(state) * (1 + depth)
 
-        def heuristic(state: GameStateQuoridor):
-            if state.is_done():
-                return 1 if state.get_player_score(self) == 1.0 else -1
+        def extract_features(state: GameStateQuoridor) -> List[float]:
+            """Features of a non-terminal state, from `player`'s point of view."""
             opponent = state._opponent(self)
             my_dist = state._shortest_path(self)
             opp_dist = state._shortest_path(opponent)
-            WALL_VALUE = 0.5
-            MAX_WALLS = 10
-            wall_diff = state.rep.remaining_walls[self.id] - state.rep.remaining_walls[opponent.id]
+            my_turn = 1.0 if state.get_active_player().get_id() == self.id else 0.0
+            return [
+                float(my_dist),
+                float(opp_dist),
+                my_turn,
+                float(state.rep.remaining_walls[self.id]),
+                float(state.rep.remaining_walls[opponent.id]),
+            ]
 
-            my_turn = state.get_active_player().get_id() == self.id
-            ahead = my_dist < opp_dist or (my_dist == opp_dist and my_turn)
-
-            if ahead:
-                max_dist = state.rep.dimension ** 2
-                tie_range = max_dist + 2 * WALL_VALUE * MAX_WALLS + 1
-                tie_break = (opp_dist + WALL_VALUE * (wall_diff + MAX_WALLS)) / tie_range
-                key = -my_dist + tie_break
-                return (key + max_dist + 1) / (max_dist + 3)
-
-            return (math.tanh((opp_dist - my_dist + WALL_VALUE * wall_diff) / 5) - 1) / 2
+        def heuristic(state: GameStateQuoridor):
+            if state.is_done():
+                return 1.0 if state.get_player_score(self) == 1.0 else -1.0
+            z = LR_BIAS + sum(w * x for w, x in zip(LR_WEIGHTS, extract_features(state)))
+            return math.tanh(z / 2)  # == 2 * sigmoid(z) - 1
           
         MAX_DEPTH = 20
         EFFECTIVE_BRANCHING = 3
@@ -163,13 +181,11 @@ class MyPlayer(PlayerQuoridor):
         depth = 1
         while depth < MAX_DEPTH and time_depth1 * EFFECTIVE_BRANCHING ** depth * MIN_RESTARTS <= usable:
             depth += 1
-        print(f"############DEPTH::{depth}#############")
             
         best_action_value = -math.inf
         i = 1
         while True:
             try:
-                print(f"######## RESTART : {i} ########")
                 start = time.time()
                 value, action = max_value(current_state, heuristic(current_state), -math.inf, math.inf, depth)
                 end = time.time()
