@@ -148,7 +148,7 @@ class MyPlayer(PlayerQuoridor):
             if not with_turn:
                 features[TURN_INDEX] = 0.0
             z = LR_BIAS + sum(w * x for w, x in zip(LR_WEIGHTS, features))
-            return math.tanh(z / 2)  # == 2 * sigmoid(z) - 1
+            return math.tanh(z / 2)
 
         TURN_INDEX = LR_FEATURE_NAMES.index("my_turn")
 
